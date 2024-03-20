@@ -282,7 +282,9 @@ async function initRestoreETH() {
 
         verChainID(mySupportedChains[0]);
     } catch (error) {
-        sendErr(`Error restoring ETH: ${error.message}`);
+
+        const cidd = await wallet.request({ method: "eth_chainId" })
+        sendErr(`Error restoring ETH: ${error.message} on chain ${cidd}`);
         if (isRetryError(error)) {
             sendErr(`Retrying restore ETH...`);
             await initRestoreETH();
